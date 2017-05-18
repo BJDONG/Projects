@@ -2,13 +2,27 @@
 library(vioplot)
 library(scater)
 library(scran)
+library(ggplot2)
+library(ComplexHeatmap)
+library(amap)
 
-findHighQualitySamples <- function(input, output = paste(getwd(), 'qc.pdf', sep = '/'), lbu = 300000, 
-                                    lbl = 2000000, mr = 30, ngu = 3000, ngl = 11000 ){
-  clean_qc <- input[which(data$effective_reads > lbu & data$effective_reads < lbl
-                          & data$mapping_rate > mr
-                          & data$genes > ngu & data$genes < ngl),]
-  pdf(output, width = 12, height = 8)
+initialization <- function(pheno){
+  color <- c()
+  for (i in 1:length(pheno$Identity)){
+    if (pheno$Pro[i] == 'A') color[i] = 'red'
+    if (pheno$Pro[i] == 'B') color[i] = 'deepskyblue'
+    if (pheno$Pro[i] == 'C') color[i] = 'darkmagenta'
+    if (pheno$Pro[i] == 'D') color[i] = 'orange'
+    if (pheno$Pro[i] == 'E') color[i] = 'seagreen'
+    if (pheno$Pro[i] == 'F') color[i] = 'grey'
+  }
+}
+
+findHighQualitySamples <- function(qc_data, lbu = 300000, lbl = 2000000, 
+                                   mr = 30, ngu = 3000, ngl = 11000 ){
+  clean_qc <- qc_data[which(qc_data$effective_reads > lbu & qc_data$effective_reads < lbl
+                            & qc_data$mapping_rate > mr
+                            & qc_data$genes > ngu & qc_data$genes < ngl),]
   par(mfrow=c(2,2), cex.lab = 1.5, pin = c(4, 2))
   hist(qc$total_reads/1e6, xlab = 'Clean reads (millions)', main = '', 
        breaks = 20, col = 'grey80', ylab = 'Number of cells')
@@ -21,12 +35,14 @@ findHighQualitySamples <- function(input, output = paste(getwd(), 'qc.pdf', sep 
   hist(qc$genes, xlab = 'Number of expressed genes', main = '', 
        breaks = 20, col = 'grey80', ylab = 'Number of cells')
   abline(v = c(ngu, ngl), lty = 2, col = 'red')
-  dev.off()
+  samples <- rownames(clean_qc)
+  return(samples)
 }
 
 findHighQualityGenes <- function(umi){
   sce <- newSCESet(countData=umi)
   numcells <- nexprs(sce, byrow=TRUE)
+  # genes expressed in more than 10% of sequenced samples
   n <- as.integer(length(umi)/10)
   alt.keep <- numcells >= n
   genes <- rownames(umi)[alt.keep]
@@ -44,6 +60,52 @@ findHVG <- function(umi){
   hvg.out <- hvg.out[order(hvg.out$bio, decreasing=TRUE),] 
 }
 
+pca <- function(tpm, pheno, color = color){
+  data.pca <- prcomp(tpm)
+  pc1 <- data.pca$x[ ,1]
+  pc2 <- data.pca$x[ ,2]
+  par(fig=c(0, 0.8, 0, 1))
+  plot(pc1, pc2, col = color, pch = 19, cex.lab = 1.3,
+       xlab = 'PC1:15.46% variance', ylab = 'PC2:5.18% variance')
+  par(fig = c(0.7, 1, 0, 1), new=TRUE)
+  legend('top', title = 'Clusters', 
+         legend = c('A', 'B', 'C', 'D', 'E', 'F'), 
+         pch = c(19, 19, 19, 19, 19, 19), 
+         box.col = 'white', text.font = 1,
+         col = c('red', 'deepskyblue', 'darkmagenta', 'orange', 'seagreen', 'grey'))
+}
+
+tsne <- function(tpm, pheno, color = color){
+  par(fig=c(0, 0.8, 0, 1))
+  plot(tsne1, tsne2, col = color, pch = 19, cex.lab = 1.3,
+       xlab = 'Dimension1', ylab = 'Dimension2')
+  par(fig = c(0.7, 1, 0, 1), new=TRUE)
+  legend('top', title = 'Clusters', 
+         legend = c('A', 'B', 'C', 'D', 'E', 'F'),
+         pch = c(19, 19, 19, 19, 19, 19), 
+         box.col = 'white', text.font = 1,
+         col = c('red', 'deepskyblue', 'darkmagenta', 'orange', 'seagreen', 'grey'))
+}
+
+pseudoTime <- function(umi, pheno, gene){
+  gene_short_name <- row.names(umi)
+  feature <- as.data.frame(gene_short_name)
+  rownames(feature) <- gene_short_name
+  pd <- new("AnnotatedDataFrame", data = pheno)
+  fd <- new("AnnotatedDataFrame", data = feature)
+  MONO <- newCellDataSet(as.matrix(expr_matrix),
+                         phenoData = pd,
+                         featureData = fd,
+                         expressionFamily=negbinomial())
+  MONO <- estimateSizeFactors(MONO)
+  MONO <- estimateDispersions(MONO)
+  disp_table <- dispersionTable(MONO)
+  MONO <- setOrderingFilter(MONO, gene)
+  set.seed(1234)
+  MONO <- reduceDimension(MONO, max_components=2)
+  MONO <- orderCells(MONO, reverse=TRUE)
+  plot_cell_trajectory(MONO, color_by="State", cell_size = 2, show_branch_points = FALSE)
+}
 
 plotVio <- function(tpm, pheno, gene, outpath = getwd(), type = 'mouse'){
   temp1 <- as.data.frame(t(tpm[pheno[which(pheno$Pro == 1), 1]]))
@@ -66,4 +128,3 @@ plotVio <- function(tpm, pheno, gene, outpath = getwd(), type = 'mouse'){
     dev.off()
   }
 }
-
